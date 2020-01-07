@@ -1,0 +1,59 @@
+
+# 新生存证开发手册
+
+&nbsp;
+
+## 目录
+
+  - [1. 架构与组网](show_md.html#overview)
+  - [2. 安装与部署](show_md.html#deploy)
+  - [3. 源码走读](show_md.html#go_through)
+  - [4. 存证 API](show_md.html#api)
+  - [5. 定制扩展](show_md.html#porting)
+
+&nbsp;
+
+## 4. 存证 API
+
+### 4.1 新生链存证格式
+
+新生链的通用存证格式为：
+
+```
+  <OP_RETURN> <04 PROTOCOL_ID> 
+  <OP_PUSHDATA1> <len data> <OP_PUSHDATA1> <len data>  ...
+```
+
+当前已使用 `PROTOCOL_ID=0` 的情况，即，按如下格式实现存证：
+
+```
+  <OP_RETURN> <04 PROTOCOL_ID=0> 
+  <OP_PUSHDATA1> <05 'PROOF'>
+  <OP_PUSHDATA1> <00 00>
+  <OP_PUSHDATA1> <len content>
+```
+
+其中 `<00 00>` 用于分隔被存证的内容项（即最后一项）。
+
+现在我们增加 `PROTOCOL_ID=1` 存证格式：
+
+```
+  <OP_RETURN> <04 PROTOCOL_ID=1> 
+  <OP_PUSHDATA1> <len OwnerId>
+  <OP_PUSHDATA1> <len BlockId>
+  <OP_PUSHDATA1> <len hash>
+  <OP_PUSHDATA1> <00 00>
+  <OP_PUSHDATA1> <len content>
+```
+
+其中，OwnerId 加上 BlockId 可以唯一标识一个 “待存证内容集合”，确定集合后，集合中的各次待存证内容，既可由 `OwnerId-BlockId-index` 位置 ID 来标识，也可由待存证内容的哈希值来标识。
+
+&nbsp;
+
+### 4.2 新生链存证格式
+
+如何将 “待存证内容集合” 的哈希值存证到区块链，请阅读 `ev_commit.py` 源文件，其中 `prepare_txn2_()` 函数用来生成用于存证的交易请求，`submit_txn_()` 用于提交请求。
+
+向区块链发起存证交易符合 NBC Wallet 的 API 规格，请结合 NBC 的用户手册阅读本样例源码。
+
+&nbsp;

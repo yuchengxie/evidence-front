@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>提交存证</title>
+  <meta http-equiv="X-UA-Compatible" content="IE-edge">
+  <!--[if lt IE 11]>
+<script src="https://cdn.polyfill.io/v2/polyfill.min.js"></script>
+<![endif]-->
+
+  <link rel="stylesheet" href="res/bootstrap.css">
+</head>
+
+<body>
+
+  <div class="container">
+
+    <h2>请求存证</h2>
+    <p>&nbsp;</p>
+
+    <div class="row">
+      <div class="col-md-10">
+        <div class="input-group mb-3">
+          <div class="input-group-prepend">
+            <span class="input-group-text">账号</span>
+          </div>
+          <input id='account-pub' type="text" class="form-control" readonly>
+          <div class="input-group-append">
+            <button class="btn btn-outline-secondary" type="button" data-toggle="modal"
+              data-target="#modi-account">更改</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="modi-account" tabindex="-1" role="dialog">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">更换账号</h5>
+            <button type="button" class="close" data-dismiss="modal">
+              <span>&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="input-group mb-3">
+              <div class="input-group-prepend">
+                <span class="input-group-text" id="new-seed">种子码</span>
+              </div>
+              <input id="seed-input" type="text" class="form-control" value="TianMiYu:13688888888:password">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-primary" onclick='renewAccount(event)'>生成账号</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-10">
+        <div class="form-group">
+          <label for="to-submit">待存证内容</label>
+          <textarea id="to-submit" class="form-control" rows="8"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <button id="submit-it" type="button" class="btn btn-outline-info" onclick="submitEvidence(event)">提交</button>
+
+    <p>&nbsp;</p>
+
+    <div class="row">
+      <div class="col-md-10">
+        <div id="submit-result" class="alert d-none" role="alert"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="res/jquery-3.4.1.min.js"></script>
+  <script src="res/popper.min.js"></script>
+  <script src="res/bootstrap.min.js"></script>
+
+  <script src='res/nbt_wallet.min.js'></script>
+
+  <script>
+    var Buffer = require('safe-buffer').Buffer;
+    var bip32 = require('bip32');
+    var createHash = require('create-hash');
+    var bs58check = require('bs58check');
+
+    var rootSeed = 'TianMiYu:13688888888:password';
+    var rootAccount = bip32.fromSeed(Buffer.from(rootSeed));
+    var openAccount = rootAccount.derivePath("m/44'/0'/0/0/0/0/0/888");
+    
+    function sha256x2(buffer) { // buffer can be utf-8 string
+      var tmp = createHash('sha256').update(buffer).digest();
+      return createHash('sha256').update(tmp).digest();
+    }
+
+    function makeNbcPubAddr(pubKey, ver) {
+      // step 1: public key --> public hash
+      var h = createHash('sha512').update(pubKey).digest();
+      var HL = createHash('ripemd160').update(h.slice(0, 32)).digest();
+      var HR = createHash('ripemd160').update(h.slice(32, 64)).digest();
+      var pubHash = createHash('sha256').update(HL).update(HR).digest();
+
+      // step 2: prepare first 36 bytes of middle-addr: ver1 vcn2 hash32 cointype1
+      var buf = Buffer.allocUnsafe(36);
+      buf[0] = ver;
+      buf[1] = 0;
+      buf[2] = 0; // vcn fixed to 0
+      pubHash.copy(buf, 3, 0, 32); // copy pubHash[0:32] to buf[3:]
+      buf[35] = 0; // cointype = 0
+
+      // step 3: make checkcode and append it to middle-addr, then translate to base58
+      return bs58check.encode(buf); // add 4 bytes check code (double_hash[0:4])
+    }
+
+    var dict_schema_ = '@DICT';
+    var byte_schema_ = '@BYTE';
+
+    // dict --> ['@DICT',[key,value], ...]  // each item is ordered by key name
+    // bytes --> ['@BYTE',n, ...]           // n should be 0 ~ 255
+    function serial_msg(msg) {
+      var tp = msg === null ? 'null' : (msg instanceof Buffer ? 'bytes' : typeof (msg));
+      if (tp == 'object') {
+        if (typeof msg.length == 'number' && typeof msg.splice === 'function' && !msg.propertyIsEnumerable('length'))
+          tp = 'array';
+      }
+
+      if (tp == 'object') {
+        var attr, names = [];
+        for (attr in msg) {
+          if (msg.hasOwnProperty(attr))
+            names.push(attr);
+        }
+        names.sort();
+
+        var bRet = [dict_schema_];
+        for (var i = 0; attr = names[i]; i++) {
+          bRet.push([attr, serial_msg(msg[attr])]);
+        }
+        return bRet
+      } else if (tp == 'bytes') {
+        var bRet = msg.toJSON().data;
+        bRet.splice(0, 0, byte_schema_);
+        return bRet;
+      } else return msg; // no changing
+    }
+
+    function unserial_msg(msg) {
+      var tp = msg === null ? 'null' : typeof (msg);
+      if (tp == 'object') {
+        if (typeof msg.length == 'number' && typeof msg.splice === 'function' && !msg.propertyIsEnumerable('length'))
+          tp = 'array';
+      }
+
+      if (tp == 'array' && msg.length > 0) {
+        var schema = msg[0];
+        if (schema == dict_schema_) {
+          var dRet = {},
+            size = msg.length;
+          for (var i = 1; i < size; i++) {
+            dRet[msg[i][0]] = unserial_msg(msg[i][1]);
+          }
+          return dRet;
+        } else if (schema == byte_schema_)
+          return Buffer.from(msg.slice(1));
+      }
+
+      return msg;
+    }
+
+    function renewAccount(event) {
+      var seed = $('#seed-input').val().trim();
+      if (seed.length < 26) {
+        alert('seed is too short,hhhhh');
+        return;
+      }
+      console.log('=====111111=====');
+
+      rootSeed = seed;
+      rootAccount = bip32.fromSeed(Buffer.from(rootSeed));
+
+      console.log('rootAccount:', rootAccount);
+
+      openAccount = rootAccount.derivePath("m/44'/0'/0/0/0/0/0/888");
+      $('#account-pub').val(makeNbcPubAddr(openAccount.publicKey, 0));
+
+      $('#modi-account').modal('hide');
+    }
+
+    function submitEvidence(event) {
+      var sInMsg = $('#to-submit').val().trim();
+      if (!sInMsg) {
+        alert('存证内容不能为空');
+        return
+      }
+      var msg, msgOK = true;
+      if (sInMsg[0] != '{' || sInMsg[sInMsg.length - 1] != '}')
+        msgOK = false;
+      else {
+        try {
+          msg = JSON.parse(sInMsg);
+        } catch (e) {
+          msgOK = false;
+        }
+      }
+      if (!msgOK) {
+        alert('存证内容要求填写 JSON DICT 字串');
+        return;
+      }
+
+      msg.account = openAccount.publicKey;
+      msg.time = parseInt((new Date()).valueOf() / 1000);
+      // console.log('compressed public key:',msg.account.toString('hex'));
+      console.log('msg1:',msg);
+      
+      var data = serial_msg(msg);
+      console.log('data:',data);
+      var dataStr = JSON.stringify(data);
+      console.log('dataStr:',dataStr);
+      var sigSour = sha256x2(dataStr);
+      var sig = openAccount.sign(sigSour);
+
+      $.ajax({
+        url: '/ev/item?sig=' + sig.toString('hex'),
+        type: 'POST',
+        data: dataStr,
+        success: function (res) {
+          var node = $('#submit-result');
+          node.removeClass('d-none alert-warning');
+          node.addClass('alert-success');
+
+          var b = res.split(':'); // res is 'position_info:hex_signature'
+          node.text('成功提交, hash=' + sigSour.toString('hex') + ', PositionId=' + b[0]);
+        },
+        error: function (err) {
+          var sErr = '提交失败';
+          if (err.responseText)
+            sErr += ':' + err.responseText;
+
+          var node = $('#submit-result');
+          node.removeClass('d-none alert-success');
+          node.addClass('alert-warning');
+          node.text(sErr);
+        },
+      });
+    }
+
+    $(function () {
+      $('#account-pub').val(makeNbcPubAddr(openAccount.publicKey, 0));
+      $('#to-submit').val('{\n  "message": "example",\n  "location": "116.389550,39.928167"\n}');
+    });
+  </script>
+
+</body>
+
+</html>

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Markdown Document</title>
+</head>
+<body>
+
+<div id="mark-down"></div>
+
+<script src="res/jquery-3.4.1.min.js"></script>
+
+<link rel="stylesheet" href="res/highlightjs.min.css">
+<script src="res/highlight.min.js"></script>
+
+<!-- from: https://github.com/markdown-it/markdown-it -->
+<script src="res/markdown-it.min.js"></script>
+
+
+<script>
+function parseUrlArg(arg) {
+  var d = {}, b = arg.split('&');
+  for (var i=0,s; s=b[i]; i++) {
+    var b2 = s.split('=');
+    var sName = b2[0];
+    
+    b2.splice(0,1);
+    if (b2.length == 0)
+      d[sName] = '1';
+    else d[sName] = decodeURIComponent(b2.join('='));
+  }
+  return d;
+}
+
+$( function() {
+  $(window).on('hashchange', function(ev) {
+    openMdFile();
+  });
+  
+  var markdown = window.markdownit( {
+    html: true,
+    highlight: function(str,lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        try {
+          return hljs.highlight(lang,str).value;
+        } catch (__) {}
+      }
+      return ''; // use external default escaping
+    },
+  });
+  
+  openMdFile();
+  
+  function openMdFile() {
+    var hash = '', doc = decodeURIComponent((location.hash || '#get_start').slice(1));
+    var pos = doc.indexOf('#');
+    if (pos > 0) {
+      hash = doc.slice(pos+1);
+      doc = doc.slice(0,pos);
+    }
+    
+    $.ajax( { url:'doc/' + doc + '.txt',
+      contentType: 'text/plain',
+      success: function(data) {
+        $('#mark-down')[0].innerHTML = markdown.render(data);
+        if (hash) {
+          setTimeout( function() {
+            try {
+              var node = document.querySelector('#' + hash);
+              if (node) node.scrollIntoView(true); // true for scroll into top
+            }
+            catch(__) { }
+          },600);
+        }
+      },
+      error: function(e) {
+        console.log(e.status + ': ' + e.responseText);
+      },
+    });
+  }
+})
+</script>
+
+</body>
+</html>

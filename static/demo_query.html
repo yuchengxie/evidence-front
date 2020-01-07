@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>存证查询</title>
+<meta http-equiv="X-UA-Compatible" content="IE-edge">
+<!--[if lt IE 11]>
+<script src="https://cdn.polyfill.io/v2/polyfill.min.js"></script>
+<![endif]-->
+
+<link rel="stylesheet" href="res/bootstrap.css">
+</head>
+<body>
+
+<div class="container">
+
+<h2>存证查询</h2>
+<p>&nbsp;</p>
+
+<div class="row"><div class="col-md-10">
+<div class="input-group mb-3">
+  <div class="input-group-prepend">
+    <span class="input-group-text">账号</span>
+  </div>
+  <input id='account-pub' type="text" class="form-control" readonly>
+  <div class="input-group-append">
+    <button class="btn btn-outline-secondary" type="button" data-toggle="modal" data-target="#modi-account">更改</button>
+  </div>
+</div>
+</div></div>
+
+<div class="modal fade" id="modi-account" tabindex="-1" role="dialog">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">更换账号</h5>
+        <button type="button" class="close" data-dismiss="modal">
+          <span>&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+<div class="input-group mb-3">
+  <div class="input-group-prepend">
+    <span class="input-group-text" id="new-seed">种子码</span>
+  </div>
+  <input id="seed-input" type="text" class="form-control" value="TianMiYu:13688888888:password">
+</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" onclick='renewAccount(event)'>生成账号</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<button id="list-ev" type="button" class="btn btn-outline-info" onclick="listEvidence(event)">最近存证</button>
+<p>&nbsp;</p>
+
+</div>
+
+<div id="ev-data-list" class="container d-none" onclick="showDetail(event)"></div>
+
+<div id="ev-detail" class="container d-none">
+<p>&nbsp;</p>
+<div class="row"><div class="col-md-10">
+<div class="form-group">
+  <label for="ev-textarea">存证内容</label>
+  <textarea id="ev-textarea" class="form-control" rows="20" readonly></textarea>
+</div>
+</div></div>
+</div>
+
+
+<script src="res/jquery-3.4.1.min.js"></script>
+<script src="res/popper.min.js"></script>
+<script src="res/bootstrap.min.js"></script>
+
+<script src='res/nbt_wallet.min.js'></script>
+
+<script>
+var Buffer = require('safe-buffer').Buffer;
+var bip32 = require('bip32');
+var createHash = require('create-hash');
+var bs58check = require('bs58check');
+
+var rootSeed = 'TianMiYu:13688888888:password';
+var rootAccount = bip32.fromSeed(Buffer.from(rootSeed));
+var openAccount = rootAccount.derivePath("m/44'/0'/0/0/0/0/0/888");
+
+function sha256x2(buffer) {  // buffer can be utf-8 string
+  var tmp = createHash('sha256').update(buffer).digest();
+  return createHash('sha256').update(tmp).digest();
+}
+
+function makeNbcPubAddr(pubKey, ver) {
+  // step 1: public key --> public hash
+  var h  = createHash('sha512').update(pubKey).digest();
+  var HL = createHash('ripemd160').update(h.slice(0,32)).digest();
+  var HR = createHash('ripemd160').update(h.slice(32,64)).digest();
+  var pubHash = createHash('sha256').update(HL).update(HR).digest();
+  
+  // step 2: prepare first 36 bytes of middle-addr: ver1 vcn2 hash32 cointype1
+  var buf = Buffer.allocUnsafe(36);
+  buf[0] = ver;
+  buf[1] = 0; buf[2] = 0;       // vcn fixed to 0
+  pubHash.copy(buf,3,0,32);     // copy pubHash[0:32] to buf[3:]
+  buf[35] = 0;                  // cointype = 0
+  
+  // step 3: make checkcode and append it to middle-addr, then translate to base58
+  return bs58check.encode(buf); // add 4 bytes check code (double_hash[0:4])
+}
+
+var dict_schema_ = '@DICT';
+var byte_schema_ = '@BYTE';
+
+// dict --> ['@DICT',[key,value], ...]  // each item is ordered by key name
+// bytes --> ['@BYTE',n, ...]           // n should be 0 ~ 255
+function serial_msg(msg) {
+  var tp = msg === null? 'null': (msg instanceof Buffer? 'bytes': typeof(msg));
+  if (tp == 'object') {
+    if (typeof msg.length == 'number' && typeof msg.splice === 'function' && !msg.propertyIsEnumerable('length'))
+      tp = 'array';
+  }
+  
+  if (tp == 'object') {
+    var attr, names = [];
+    for (attr in msg) {
+      if (msg.hasOwnProperty(attr))
+        names.push(attr);
+    }
+    names.sort();
+    
+    var bRet = [dict_schema_];
+    for (var i=0; attr=names[i]; i++) {
+      bRet.push([attr,serial_msg(msg[attr])]);
+    }
+    return bRet
+  }
+  else if (tp == 'bytes') {
+    var bRet = msg.toJSON().data;
+    bRet.splice(0,0,byte_schema_);
+    return bRet;
+  }
+  else return msg;    // no changing
+}
+
+function unserial_msg(msg) {
+  var tp = msg === null? 'null': typeof(msg);
+  if (tp == 'object') {
+    if (typeof msg.length == 'number' && typeof msg.splice == 'function' && !msg.propertyIsEnumerable('length'))
+      tp = 'array';
+  }
+  
+  if (tp == 'array' && msg.length > 0) {
+    var schema = msg[0];
+    if (schema == dict_schema_) {
+      var dRet = {}, size = msg.length;
+      for (var i=1; i < size; i++) {
+        dRet[msg[i][0]] = unserial_msg(msg[i][1]);
+      }
+      return dRet;
+    }
+    else if (schema == byte_schema_)
+      return Buffer.from(msg.slice(1));
+  }
+  
+  return msg;
+}
+
+function renewAccount(event) {
+  var seed = $('#seed-input').val().trim();
+  if (seed.length < 26) {
+    alert('seed is too short');
+    return;
+  }
+  
+  rootSeed = seed;
+  rootAccount = bip32.fromSeed(Buffer.from(rootSeed));
+  openAccount = rootAccount.derivePath("m/44'/0'/0/0/0/0/0/888");
+  $('#account-pub').val(makeNbcPubAddr(openAccount.publicKey,0));
+  
+  $('#modi-account').modal('hide');
+  
+  $('#ev-data-list').addClass('d-none');
+  $('#ev-detail').addClass('d-none');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showDetail(event) {
+  var targ = event.target;
+  if (targ.nodeName != 'A') return;
+  
+  var succ = false;
+  targ = targ.parentNode;
+  if (targ && targ.nodeName == 'DD') {
+    targ = targ.parentNode;
+    if (targ && targ.nodeName == 'DL')
+      succ = true;
+  }
+  if (!succ) return;
+  
+  var sHash = $(targ).attr('hid');
+  if (!sHash) return;
+  
+  $.ajax( { url:'/ev/content?hash='+sHash, type:'GET',
+    success: function(res) {
+      try {
+        res = Buffer.from(res,'base64').toString('utf-8');
+        res = unserial_msg(JSON.parse(res));
+        
+        $('#ev-detail').removeClass('d-none');
+        var node = $('#ev-textarea');
+        node.val(JSON.stringify(res,null,2));
+      }
+      catch(err) {
+        console.log('meet error:',err);
+      }
+    },
+    error: function(err) {
+      var sErr = '查询失败';
+      if (err.responseText)
+        sErr += ':' + err.responseText;
+      alert(sErr);
+    },
+  });
+}
+
+function listEvidence(event) {
+  var sPubHex = openAccount.publicKey.toString('hex');
+  
+  $.ajax( { url:'/ev/list', type:'GET',
+    data: { addr:sPubHex },
+    success: function(res) {
+      try {
+        res = JSON.parse(res); // [[sId,time,hash], ...]
+        
+        var node = $('#ev-data-list');
+        node.removeClass('d-none');
+        node.html('');
+        node.append('<dl class="row mb-2"><dt class="col-md-3">时间</dt><dt class="col-md-3">索引号</dt><dt class="col-md-3">哈希值</dt></dl>');
+        
+        var tm = new Date();
+        for (var i=0,item; item=res[i]; i++) {
+          tm.setTime(parseInt(item[1]) * 1000);
+          var sTm = tm.toLocaleString();
+          var hash2 = escapeHtml(item[2]);
+          var sId = '<a href="javascript:void(0)">' + escapeHtml(item[0]) + '</a>';
+          var sHash = '<a href="javascript:void(0)">' + hash2 + '</a>';
+          node.append('<dl class="row mb-2" hid="' + hash2 + '"><dd class="col-md-3">' + sTm + '</dd><dd class="col-md-3">' + sId + '</dd><dd class="col-md-3">' + sHash + '</dd></dl>');
+        }
+      }
+      catch(err) { }
+    },
+    error: function(err) {
+      var sErr = '查询失败';
+      if (err.responseText)
+        sErr += ':' + err.responseText;
+      alert(sErr);
+    },
+  });
+}
+
+$( function() {
+  $('#account-pub').val(makeNbcPubAddr(openAccount.publicKey,0));
+});
+
+</script>
+
+</body>
+</html>

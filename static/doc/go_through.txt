@@ -1,0 +1,143 @@
+
+# 新生存证开发手册
+
+&nbsp;
+
+## 目录
+
+  - [1. 架构与组网](show_md.html#overview)
+  - [2. 安装与部署](show_md.html#deploy)
+  - [3. 源码走读](show_md.html#go_through)
+  - [4. 存证 API](show_md.html#api)
+  - [5. 定制扩展](show_md.html#porting)
+
+&nbsp;
+
+## 3. 源码走读
+
+### 3.1 目录结构
+
+evidence-front 工程的目录结构如下：
+
+```
+  +- nbc
+  |   |--- wallet      # 定义 NBC 钱包
+  +- root              # 定义存证操作
+  +- static            # 定义静态网页，访问 localhost:3000 时会跳转到该目录下的 index.html
+  |-- application.py   # 主入口
+```
+
+&nbsp;
+
+### 3.2 RESTful 服务
+
+源文件 `application.py` 定义如下服务：
+
+1. 网页根目录，`/` 与 `/index.html`   
+这两者均跳转至 `/static/index.html'
+
+2. `GET /ev/list`   
+列出存证项，指定终端用户 ID，可查询他提交过哪些服务。
+
+3. `GET /ev/content`   
+取得指定存证项的存证内容，存证项用 hash 值指示。
+
+4. `GET /ev/item`   
+查询存证项，充许用存证内容的 hash 值，或存证提交时分配的 “位置ID” 进行查询。  
+
+5. `POST /ev/item`   
+提交存证。  
+
+&nbsp;
+
+### 3.3 服务侧的存证操作
+
+前置机在 `POST /ev/item` 的 API 调用中，收到从终端用户那儿提交来的待存证文本，然后执行如下步骤：
+
+1. 针对待存证内容，验证终端用户给出的签名，以此确认被存证内容确实由指定公钥的终端用户给出的。
+
+2. 将待存证内容添加到当前尚在汇总中的文件。   
+前置在汇集到 MAX_REC_IN_FILE 个存证请求，或每隔 SUBMIT_ON_SECONDS 秒时，终止本轮汇总，如果汇总结果是有存证需求，则计算汇总后文件内容的 hash 值，并将该 hash 值存证到区块链。   
+这里 MAX_REC_IN_FILE 缺省取值是 5000 条，SUBMIT_ON_SECONDS 缺省取值是 1800 秒，即半小时。
+
+3. 如果存证成功，返回当前存证请求的 “位置ID”，以及前置机针对 `位置ID : 被存证项hash值` 作出的签名，该签名应视作前置机对存证请求一种确收回执。
+
+&nbsp;
+
+### 3.4 位置 ID
+
+位置 ID 用于唯一标识一次存证请求，格式为 `OwnerId-BlockId-index`，其中，OwnerId 是当前前置机的唯一 ID 号，BlockId 是当前前置机对要提交到区块链存证的 “待存证内容集合” 的唯一编号（通常从 0 开始正序向上编号），index 是本次存证请求在当前 “待存证内容集合” 中的序号，从 0 开始正序向上编号。
+
+我们假定存证前置机用到多台。在特定场景下，存证请求可能集中爆发，要求服务侧并发处理能力要跟得上，单台前置机可能满足不了业务需求。所以我们设计中，考虑前置机有多台，以反向代理方式分担业务能力。每台前置机的唯一编号（即OwnerId）由环境变量 `EV_MACHINE_ID` 指示，如果该环境变量未定义，则系统自动取当前时间来代替。
+
+可见，上述由 3 部分组成的 “位置ID”，可以唯一定位任一项存证请求。源码中计算 “位置ID” 的函数是 `ev_storage.py` 中的 `make_pos_id(ownerId, blockId, idx)`。
+
+&nbsp;
+
+### 3.5 被存证消息的序列化与反序列化
+
+本样例追求通用的存证内容表达方式，我们选用 JSON 表达。不过，JSON 格式还不能直用于描述存证内容，它有两个缺陷。
+
+其一，JSON 中的 Dict 表项可以乱序存放的，不同顺序让最终的 JSON 字串表现为不同的字串，对它做签名，就失去了唯一性，导致签名验证无法进行。对此，我们的解决方法是将字典表项转换成列表，用 `[key,value]` 逐一表达，而各表项又由 `key` 进行排序。这样，在网页调用 `JSON.stringify(content)` 后，同一 Dict 转成字串都是相同的了。
+
+其二，JSON 未支持 bytes（Python中）或 Uint8Array（JS中）数据格式，我们增加对该格式的自动转换。
+ 
+文件 `ev_storage.py` 中定义 `serial_msg(msg)` 与 `unserial_msg(msg)` 两个函数，就是用来实现存证消息的序列化与反序列化的。详细定义如下：
+
+``` python
+# dict --> ['@DICT',[key,value], ...]  # each item is ordered by key name
+# bytes --> ['@BYTE',n, ...]           # n should be 0 ~ 255
+def serial_msg(msg):
+  tp = type(msg)
+  if tp == dict:
+    names = list(msg.keys())
+    names.sort()
+    
+    bRet = [dict_schema_]
+    for name in names:
+      bRet.append([name,serial_msg(msg[name])])
+    return bRet
+  elif tp == bytes:
+    bRet = bytes2list(msg)
+    bRet.insert(0,byte_schema_)
+    return bRet
+  else: return msg    # no changing
+
+def unserial_msg(msg):
+  if type(msg) == list and msg:
+    schema = msg[0]
+    if schema == dict_schema_:
+      dRet = {}
+      for i in range(1,len(msg),1):
+        name,value = msg[i]
+        dRet[name] = unserial_msg(value)
+      return dRet
+    elif schema == byte_schema_:
+      return bytes(msg[1:])
+  return msg
+
+#----- testing -----
+# b1 = serial_msg({'time':1561970020,'message':'geography info','location':{'xy':[50,50],'desc':'somewhere'}})
+# b2 = serial_msg({'location':{'desc':'somewhere','xy':[50,50]},'message':'geography info','time':1561970020})
+# assert(json.dumps(b1) == json.dumps(b2))
+# unserial_msg(['@DICT',['location',['@DICT',['desc','somewhere'],['xy',[50,50]]]],['message','geography info'],['time',1561970020]])
+# unserial_msg(b1)
+```
+
+&nbsp;
+
+### 3.6 存证管理器
+
+在源文件 `ev_storage.py` 中，`class EvStorage(Thread)` 定义了存证管理器，它启用线程来定期执行存盘相关的工作，包括：
+
+1. 每隔 24 小时做一次文件备份   
+一个 “待存证内容集合” 对应一个 csv 文件，每次接收存证请求时，待存证内容将缓存到 `<LOCAL_DIR>/csv/recent/` 目录下，所保存的文件名格式为 `yy-mm-dd-BlockId.csv`，这里 `<LOCAL_DIR>` 代表环境变量 LOCAL_DIR 的取值，`yy-mm-dd` 分别代表年、月、日。   
+当前汇总 “待存证内容集合” 每隔 24 小时会强制保存为一个 csv 文件。   
+每隔 24 小时实施备份，是将 `<LOCAL_DIR>/csv/recent/` 目录下 MAX_CACHE_DAYS 之前的 csv 文件移到 `<LOCAL_DIR>/csv/<classify>/` 目录下，备份的目标文件名格式为 `BlockId.csv`，这里 `<classify>` 取值为 `BlockId // 256`，即，BlockId 的 256 整倍值。
+
+2. 每隔 10 分钟将当前尚在汇总 “待存证内容集合” 中的文件，强制写缓存，以防机器因掉电或死机等原因丢失待存证内容。
+
+3. 每隔 10 分钟检测 “存证项缓存” 大小，如果超限（大于 MAX_CACHE_NUMB）也触发文件备份。   
+“存证项缓存” 为方便在线查询，将本前置机近期接收的存证项缓存在 `EvStorage._cache` 中。如果在生产环境部署多台前置机时，不应该采用缓存来支持查询，而应改用分布式数据支持查询。
+
+&nbsp;

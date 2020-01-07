@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="res/bootstrap.css">
+<title>存证前置机开发指导</title>
+<!--[if lt IE 11]>
+<script src="https://cdn.polyfill.io/v2/polyfill.min.js"></script>
+<![endif]-->
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="jumbotron" id='prefix-page'>
+  <h1 class="display-4">新生链存证前置机系统</h1>
+  <p>&nbsp;</p>
+  <p class="lead">本系统以<mark>规范的存证上链</mark>提供<mark>通用的证据保全服务</mark>，易于部署、易于移植，其 API <mark>既精简又具备广泛适应性</mark>。</p>
+  <hr class="my-4">
+  <p>本系统在新生链上实现存证，新生链由深圳市红砖坊技术有限公司研发，拥有自主产权。</p>
+  <p>存证前置机是一套存证辅助系统，通常运行在云计算中心，它用于汇总存证对象、代理存证操作、提供存证查询，并配套支持用户登录及相关权限管理。</p>
+  
+  <p>&nbsp;<br><a class="btn btn-primary btn-lg" href="index.html?doc=true#get_start" role="button">了解更多...</a>
+  </p>
+</div>
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light d-none" id="main-nav">
+  <a class="navbar-brand" href="index.html?doc=true#get_start">新生存证</a>
+  <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+    <span class="navbar-toggler-icon"></span>
+  </button>
+
+  <div class="collapse navbar-collapse" id="navbarSupportedContent">
+    <ul class="navbar-nav mr-auto">
+      <li class="nav-item active">
+        <a class="nav-link" href="index.html?doc=true#get_start">快速入门 <span class="sr-only">(current)</span></a>
+      </li>
+      <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle" href="index.html?doc=true#overview" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+          开发手册
+        </a>
+        <div class="dropdown-menu" aria-labelledby="navbarDropdown">
+          <a class="dropdown-item" href="index.html?doc=true#overview">架构与组网</a>
+          <a class="dropdown-item" href="index.html?doc=true#deploy">安装与部署</a>
+          <a class="dropdown-item" href="index.html?doc=true#go_through">源码走读</a>
+          <div class="dropdown-divider"></div>
+          <a class="dropdown-item" href="index.html?doc=true#api">存证 API</a>
+          <a class="dropdown-item" href="index.html?doc=true#porting">定制扩展</a>
+        </div>
+      </li>
+      <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle" href="index.html?demo=submit" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+          在线演示
+        </a>
+        <div class="dropdown-menu" aria-labelledby="navbarDropdown">
+          <a class="dropdown-item" href="index.html?demo=submit">提交存证</a>
+          <a class="dropdown-item" href="index.html?demo=query">存证查询</a>
+        </div>
+      </li>
+    </ul>
+    <span class="navbar-text">
+      <a target='_blank' href='//www.nb-chain.net/'>关于新生链</a>
+    </span>
+  </div>
+</nav>
+
+<iframe id="main-frame" frame-border="0" style="border:0px; width:100%"></iframe>
+
+</div>
+
+
+<script src="res/jquery-3.4.1.min.js"></script>
+<script src="res/popper.min.js"></script>
+<script src="res/bootstrap.min.js"></script>
+
+<script>
+function parseUrlArg(arg) {
+  var d = {}, b = arg.split('&');
+  for (var i=0,s; s=b[i]; i++) {
+    var b2 = s.split('=');
+    var sName = b2[0];
+    
+    b2.splice(0,1);
+    if (b2.length == 0)
+      d[sName] = '1';
+    else d[sName] = decodeURIComponent(b2.join('='));
+  }
+  return d;
+}
+
+$(function() {
+  var param = parseUrlArg(window.location.search.slice(1));
+  var mainNav = $('#main-nav'), mainFrm = $('#main-frame');
+  mainFrm.height(window.innerHeight - mainNav.height());
+  
+  var frmUrl = '';
+  $(window).on('hashchange', function(ev) {
+    if (frmUrl)
+      mainFrm.attr('src',frmUrl + (location.hash || '#get_start'));
+  });
+  
+  if (param.doc || param.demo) {
+    $('#prefix-page').addClass('d-none');
+    mainNav.removeClass('d-none');
+    
+    if (param.doc) {
+      frmUrl = 'show_md.html';
+      mainFrm.attr('src',frmUrl + (location.hash || '#get_start'));
+    }
+    else mainFrm.attr('src','demo_' + param.demo + '.html');
+  }
+});
+
+</script>
+
+</body>
+</html>

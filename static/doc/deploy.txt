@@ -1,0 +1,54 @@
+
+# 新生存证开发手册
+
+&nbsp;
+
+## 目录
+
+  - [1. 架构与组网](show_md.html#overview)
+  - [2. 安装与部署](show_md.html#deploy)
+  - [3. 源码走读](show_md.html#go_through)
+  - [4. 存证 API](show_md.html#api)
+  - [5. 定制扩展](show_md.html#porting)
+
+&nbsp;
+
+## 2. 安装与部署
+
+### 2.1 在本机试运行
+
+evidence-front 工程支持 MAC 与 windows 平台，要求在 python 3.4+ 上运行，下载源码后，请在命令行窗口进入源码工程目录。
+
+本工程要求先安装如下 python 依赖库。
+
+``` bash
+  pip3 install flask
+```
+
+其中 flask 是 Web Service 框架库，evidence-front 用它把前置机的功能包装成 RESTful 服务调用，终端用户在网页中编程，调用 RESTful API 既可获得前置机的存证相关服务。
+
+然后运行如下脚本，在本机启动一个 “存证前置机”。
+
+``` bash
+  python3 application.py
+```
+
+这个存证前置机将在本机的 3000 端口启动一个 Web 服务。然后在浏览器中访问 `localhost:3000`，显示界面如下：
+
+![welcome](doc/pic/welcome.jpg)
+
+&nbsp;
+
+### 2.2 把样例工程部署到云端
+
+样例代码在本机能运行，部署同样可以运行，我们甚至不修改代码，直接将代码部署到 AWS 的 EC2 或 Aliyun 的 ECS 中，因为本样例没使用特别资源，包括数据库。
+
+不过，把样例部署到云端通常意味着，您即将开发面向用户的存证前置机了。我们接下来介绍样例工程中的几个环境变量。
+
+1. `OWNER_KEY` ，用于定义向新生链提供存证请求的账号私钥，该私钥要求使用 WIF 格式表达。因为存证需要用 token 支付手续费，使用该账号前您应保证它已拥有一定数额的 NBC token。在本样例中，该账号还用于在收到用户的存证请求后，对确收信息提供签名。
+
+2. `LOCAL_DIR` ，用于指定将存证数据存盘的目录，指定的目录要求有写入权限。对于 AWS 实例，`LOCAL_DIR` 可指定 `"/opt/python/log"` 。
+
+3. `EV_MACHINE_ID`，用于指定当前 “存证前置机” 的 ID 号，一台前置机应分配一个唯一 ID 号。
+
+&nbsp;
